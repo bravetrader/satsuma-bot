@@ -120,19 +120,23 @@ def initialize_provider(config):
         console.print(f"[red]- Provider initialization error: {str(e)}[/red]")
         sys.exit(1)
 
-# Load private keys from environment variables
+# Load private keys from environment variables (MULTI WALLET SUPPORT)
 def get_private_keys():
     private_keys = []
-    key = os.getenv("PRIVATE_KEY_1")
-    if not key:
-        console.print("[red]- No private key found in .env file[/red]")
-        sys.exit(1)
-    try:
-        account = Web3().eth.account.from_key(key)
-        console.print(f"[green]+ Loaded 1 private key[/green]")
-        private_keys.append(key)
-    except Exception as e:
-        console.print(f"[red]- Invalid private key: {str(e)}[/red]")
+    idx = 1
+    while True:
+        key = os.getenv(f"PRIVATE_KEY_{idx}")
+        if not key:
+            break
+        try:
+            account = Web3().eth.account.from_key(key)
+            console.print(f"[green]+ Loaded private key {idx} - {account.address}[/green]")
+            private_keys.append(key)
+        except Exception as e:
+            console.print(f"[red]- Invalid private key {idx}: {str(e)}[/red]")
+        idx += 1
+    if not private_keys:
+        console.print("[red]- No private keys found in .env file (use PRIVATE_KEY_1, PRIVATE_KEY_2, ...)[/red]")
         sys.exit(1)
     return private_keys
 
@@ -381,14 +385,14 @@ async def swap_usdc_to_suma(w3, config, private_key):
 
 async def run_transactions(w3, config, private_keys, transaction_count):
     console.print(f"[blue]=== Starting transaction round ===[/blue]")
-    console.print(f"[green]+ Performing {transaction_count} transactions with random amounts (0.0001-0.0002 USDC)[/green]")
+    console.print(f"[green]+ Performing {transaction_count} transactions with random amounts (0.0001-0.0002 USDC) per wallet[/green]")
 
     for i in range(transaction_count):
         console.print(f"[blue]=== Transaction {i + 1}/{transaction_count} ===[/blue]")
-        for private_key in private_keys:
+        for idx, private_key in enumerate(private_keys, 1):
+            console.print(f"[magenta]--- Wallet {idx} ---[/magenta]")
             await swap_usdc_to_suma(w3, config, private_key)
             await asyncio.sleep(2)
-
         if i < transaction_count - 1:
             console.print("[yellow]> Waiting 30 seconds before next transaction...[/yellow]")
             await asyncio.sleep(30)
