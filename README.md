@@ -4,8 +4,9 @@ Another awesome code from Kazahu
 
 ### 1. Clone this git
 
-``` git clone https://github.com/bravetrader/satsuma-bot
-    cd satuma-bot
+```
+git clone https://github.com/bravetrader/satsuma-bot.git
+cd satuma-bot
 ```
 ### 2. Create venv
 
