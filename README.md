@@ -1,5 +1,14 @@
-## satsuma-bot setup guide
-Another awesome code from Kazahu
+## 🤖 satsuma-bot setup guide
+***Another awesome code from Kazahu edited by me***
+
+**:accessibility:Feautures:**
+
+✔️ *Support multiple wallets*
+
+✔️ *Support proxy*
+
+✔️ *Auto run*
+
 ---
 
 ### 1. Clone this git
@@ -26,3 +35,4 @@ python3 bot.py
 ### 5. Enjoy!
 
 ---
+## Code is designed by Kazahu787 edited by me
