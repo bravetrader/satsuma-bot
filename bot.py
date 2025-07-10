@@ -6,19 +6,43 @@ import time
 import sys
 import os
 import json
+import urllib.parse
 from rich.console import Console
 from rich.table import Table
 
-# Initialize rich console
+# === 1. PROXY SUPPORT: Read from proxy.txt if present ===
+def get_proxy_from_file(filename="proxy.txt"):
+    if not os.path.exists(filename):
+        return None
+    with open(filename, "r") as f:
+        proxies = [line.strip() for line in f if line.strip()]
+    if not proxies:
+        return None
+    return random.choice(proxies)  # Or implement round robin if needed
+
+def get_web3_provider(rpc_url, proxy_url=None):
+    if not proxy_url:
+        return Web3(Web3.HTTPProvider(rpc_url))
+    up = urllib.parse.urlparse(proxy_url)
+    if up.scheme in ["http", "https"]:
+        return Web3(Web3.HTTPProvider(rpc_url, request_kwargs={"proxies": {"http": proxy_url, "https": proxy_url}}))
+    elif up.scheme.startswith("socks"):
+        from web3 import HTTPProvider
+        import requests
+        session = requests.Session()
+        session.proxies = {
+            "http": proxy_url,
+            "https": proxy_url
+        }
+        provider = HTTPProvider(rpc_url, session=session)
+        return Web3(provider)
+    else:
+        raise Exception(f"Unknown proxy scheme: {up.scheme}")
+
 console = Console()
-
-# Load environment variables
 load_dotenv()
-
-# File to store persistent transaction count
 CONFIG_FILE = "satsuma_config.json"
 
-# === Animated Banner ===
 def display_banner():
     banner_text = """
 ███████╗ █████╗ ████████╗███████╗██╗   ██║███╗   ███╗ █████╗ 
@@ -38,26 +62,22 @@ def display_banner():
     console.print(f"[green]+ Satsuma Bot  - CREATED BY Kazuha[/green]", justify="center")
     console.print("-" * 50, style="green", justify="center")
 
-# === CLI Menu ===
 def display_menu():
     table = Table(title="[bold blue]Satsuma Bot Menu[/bold blue]", style="green", title_justify="center", show_header=False, expand=True)
     table.add_column(justify="center", style="cyan")
-    
     options = [
         "1. Start Transactions",
         "2. Set Transaction Count",
         "3. Manual Swap",
-        "4. Exit"
+        "4. Run All Features Once",
+        "5. Exit"
     ]
-    
     for opt in options:
         table.add_row(opt)
-    
     console.print(table)
-    choice = console.input("[bold magenta]> Select option (1-4): [/bold magenta]")
+    choice = console.input("[bold magenta]> Select option (1-5): [/bold magenta]")
     return choice
 
-# Load or initialize user settings
 def load_user_settings():
     user_settings = {
         "transaction_count": 0,
@@ -73,7 +93,6 @@ def load_user_settings():
         console.print(f"[red]- Error loading settings: {str(e)}[/red]")
     return user_settings
 
-# Save transaction count to file
 def save_transaction_count(count):
     try:
         with open(CONFIG_FILE, 'w') as f:
@@ -82,18 +101,15 @@ def save_transaction_count(count):
     except Exception as e:
         console.print(f"[red]- Error saving transaction count: {str(e)}[/red]")
 
-# Generate random amount between 0.0001 and 0.0002
 def generate_random_amount():
     min_amount = 0.0001
     max_amount = 0.0002
     random_amount = random.uniform(min_amount, max_amount)
     return round(random_amount, 6)
 
-# Load configuration from .env
 def load_config():
     display_banner()
     console.print("[yellow]> Loading configuration...[/yellow]", justify="center")
-    
     config = {
         "rpc": "https://rpc.testnet.citrea.xyz",
         "chain_id": 5115,
@@ -105,22 +121,8 @@ def load_config():
         "wcbtc_address": Web3.to_checksum_address("0x8d0c9d1c17ae5e40fff9be350f57840e9e66cd93"),
         "suma_address": Web3.to_checksum_address("0xdE4251dd68e1aD5865b14Dd527E54018767Af58a"),
     }
-
     return config
 
-# Initialize Web3 provider
-def initialize_provider(config):
-    try:
-        w3 = Web3(Web3.HTTPProvider(config["rpc"]))
-        if not w3.is_connected():
-            raise Exception("Failed to connect to RPC")
-        console.print(f"[green]+ Connected to {config['rpc']} (Chain ID: {config['chain_id']})[/green]")
-        return w3
-    except Exception as e:
-        console.print(f"[red]- Provider initialization error: {str(e)}[/red]")
-        sys.exit(1)
-
-# Load private keys from environment variables (MULTI WALLET SUPPORT)
 def get_private_keys():
     private_keys = []
     idx = 1
@@ -140,7 +142,6 @@ def get_private_keys():
         sys.exit(1)
     return private_keys
 
-# ERC20 ABI
 ERC20_ABI = [
     {
         "constant": False,
@@ -171,7 +172,6 @@ ERC20_ABI = [
     }
 ]
 
-# Swap Router ABI
 SWAP_ROUTER_ABI = [
     {
         "inputs": [
@@ -197,7 +197,6 @@ SWAP_ROUTER_ABI = [
     }
 ]
 
-# Algebra Pool ABI
 ALGEBRA_POOL_ABI = [
     {
         "constant": True,
@@ -428,45 +427,65 @@ async def manual_swap(w3, config, private_keys):
         except Exception as e:
             console.print(f"[red]- Error getting user input: {str(e)}[/red]")
 
-async def main():
-    try:
-        config = load_config()
-        w3 = initialize_provider(config)
-        private_keys = get_private_keys()
-        user_settings = load_user_settings()
+async def run_all_features(w3, config, private_keys, user_settings):
+    # Option 1: Start Transactions (if count set)
+    if user_settings["transaction_count"] > 0:
+        await run_transactions(w3, config, private_keys, user_settings["transaction_count"])
+    # Option 3: Manual Swap (run 1 swap per wallet)
+    await run_transactions(w3, config, private_keys, 1)
 
-        while True:
-            choice = display_menu()
-            try:
-                option = int(choice)
-                if option == 4:
-                    console.print("[yellow]> Exiting Satsuma Auto Bot...[/yellow]")
-                    sys.exit(0)
-                elif option == 1:
-                    if user_settings["transaction_count"] == 0:
-                        console.print("[red]- Transaction count not set. Please set transaction count first.[/red]")
-                        continue
-                    console.print(f"[blue]=== Starting Swap Transactions ===[/blue]")
-                    user_settings["current_round"] += 1
-                    await run_transactions(w3, config, private_keys, user_settings["transaction_count"])
-                    console.print("[yellow]> Waiting 5 minutes before next round...[/yellow]")
-                    await asyncio.sleep(300)
-                elif option == 2:
-                    user_settings["transaction_count"] = await set_transaction_count()
-                elif option == 3:
-                    await manual_swap(w3, config, private_keys)
-                else:
-                    console.print("[red]- Invalid option. Please select 1-4.[/red]")
-            except ValueError:
-                console.print("[red]- Invalid input. Please enter a number.[/red]")
-            except Exception as e:
-                console.print(f"[red]- Error in main loop: {str(e)}[/red]")
-                console.print("[yellow]> Waiting 5 minutes before retry...[/yellow]")
+async def menu_main(w3, config, private_keys, user_settings):
+    while True:
+        choice = display_menu()
+        try:
+            option = int(choice)
+            if option == 5:
+                console.print("[yellow]> Exiting Satsuma Auto Bot...[/yellow]")
+                sys.exit(0)
+            elif option == 1:
+                if user_settings["transaction_count"] == 0:
+                    console.print("[red]- Transaction count not set. Please set transaction count first.[/red]")
+                    continue
+                console.print(f"[blue]=== Starting Swap Transactions ===[/blue]")
+                user_settings["current_round"] += 1
+                await run_transactions(w3, config, private_keys, user_settings["transaction_count"])
+                console.print("[yellow]> Waiting 5 minutes before next round...[/yellow]")
                 await asyncio.sleep(300)
+            elif option == 2:
+                user_settings["transaction_count"] = await set_transaction_count()
+            elif option == 3:
+                await manual_swap(w3, config, private_keys)
+            elif option == 4:
+                await run_all_features(w3, config, private_keys, user_settings)
+            else:
+                console.print("[red]- Invalid option. Please select 1-5.[/red]")
+        except ValueError:
+            console.print("[red]- Invalid input. Please enter a number.[/red]")
+        except Exception as e:
+            console.print(f"[red]- Error in menu loop: {str(e)}[/red]")
+            console.print("[yellow]> Waiting 5 minutes before retry...[/yellow]")
+            await asyncio.sleep(300)
 
-    except Exception as e:
-        console.print(f"[red]- Main execution error: {str(e)}[/red]")
-        sys.exit(1)
+async def twentyfour_hour_auto(w3, config, private_keys, user_settings):
+    while True:  # 24hr automation loop
+        start_time = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())
+        console.print(f"\n[bold blue]=== Automated 24hr Run: {start_time} ===[/bold blue]")
+        await run_all_features(w3, config, private_keys, user_settings)
+        console.print(f"[cyan]=== Waiting 24 hours before next run... ===[/cyan]")
+        await asyncio.sleep(86400)  # 24 hours
+
+async def main():
+    config = load_config()
+    proxy_url = get_proxy_from_file() or os.getenv("PROXY", "").strip()
+    w3 = get_web3_provider(config["rpc"], proxy_url=proxy_url)
+    private_keys = get_private_keys()
+    user_settings = load_user_settings()
+
+    # Run menu and automation in parallel
+    await asyncio.gather(
+        menu_main(w3, config, private_keys, user_settings),
+        twentyfour_hour_auto(w3, config, private_keys, user_settings)
+    )
 
 if __name__ == "__main__":
     try:
